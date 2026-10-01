@@ -1,0 +1,40 @@
+[project]
+name = "romania-mcp-server"
+version = "0.1.0"
+description = "MCP server for Romanian public data: ANAF company status, financial statements, court cases, BNR exchange rates, online shop checks"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Robert Vind-Gardoș" }]
+requires-python = ">=3.10"
+keywords = ["mcp", "romania", "anaf", "cui", "bnr", "portal-just", "e-factura", "claude"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Natural Language :: Romanian",
+    "Topic :: Office/Business :: Financial :: Accounting",
+]
+dependencies = [
+    "mcp>=2.0",
+    "httpx>=0.27",
+]
+
+[project.urls]
+Repository = "https://github.com/robyroro/romania-mcp"
+Author = "https://stratagency.ro/en/robert-vind-gardos"
+
+[project.scripts]
+romania-mcp = "romania_mcp.server:main"
+# so `uvx romania-mcp-server` works without --from
+romania-mcp-server = "romania_mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/romania_mcp"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
