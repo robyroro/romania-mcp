@@ -2,17 +2,17 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.robyroro/romania-mcp",
   "title": "Romania",
-  "description": "Romanian public data: ANAF company status, financials, court cases, BNR rates, shop checks",
+  "description": "Romanian company reports, ONRC search, public contracts, VAT checks and local monitoring",
   "repository": {
     "url": "https://github.com/robyroro/romania-mcp",
     "source": "github"
   },
-  "version": "0.1.0",
+  "version": "0.2.0",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "romania-mcp-server",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"

@@ -3,10 +3,9 @@ import json
 
 import httpx
 import pytest
+from conftest import anaf_item, bilant_body, mock_client
 
 from romania_mcp import anaf
-
-from conftest import anaf_item, bilant_body, mock_client
 
 
 @pytest.mark.parametrize("raw", ["14399840", "RO14399840", " ro 14399840 ", 14399840, "18547290"])

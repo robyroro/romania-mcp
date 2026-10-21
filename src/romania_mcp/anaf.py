@@ -129,11 +129,18 @@ async def lookup(client, cuis, on=None):
         r = await client.post(TVA_URL, json=[{"cui": c, "data": on} for c in batch])
         r.raise_for_status()
         body = r.json()
-        for item in body.get("found") or []:
-            company = parse_company(item)
+        if not isinstance(body, dict) or "found" not in body or "notFound" not in body:
+            raise ValueError("ANAF returned no company lookup result")
+        parsed = [parse_company(item) for item in body["found"] or []]
+        missing = [int(item["cui"] if isinstance(item, dict) else item) for item in body["notFound"] or []]
+        if any(not c.get("name") or c.get("cui") not in batch for c in parsed):
+            raise ValueError("ANAF returned an unexpected company identity")
+        if {c["cui"] for c in parsed} | set(missing) != set(batch):
+            raise ValueError("ANAF returned an incomplete company lookup result")
+        for company in parsed:
             found[company["cui"]] = company
             cache.set(f"anaf:{company['cui']}:{on}", company, 6 * 3600)
-        not_found += body.get("notFound") or []
+        not_found += missing
 
     return [found[c] for c in dict.fromkeys(cuis) if c in found], not_found
 
@@ -199,6 +206,8 @@ async def bilant(client, cui, year):
         r = await client.get(BILANT_URL, params={"an": year, "cui": cui})
         r.raise_for_status()
         data = r.json()
+        if not isinstance(data, dict) or data.get("an") != year or data.get("cui") != cui or not isinstance(data.get("i"), list):
+            raise ValueError("ANAF returned no matching financial statement result")
         parsed = parse_bilant(data)
         meta = {"name": data.get("deni") or None, "caen": data.get("caen") or None,
                 "caen_description": data.get("den_caen") or None}

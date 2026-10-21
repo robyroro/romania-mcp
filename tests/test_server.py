@@ -7,7 +7,10 @@ TOOLS = asyncio.run(mcp.list_tools())
 
 def test_all_tools_registered():
     assert sorted(t.name for t in TOOLS) == [
-        "company_financials", "company_lookup", "court_cases", "exchange_rate", "iban_check", "shop_check",
+        "company_changes", "company_contracts", "company_financials", "company_history", "company_lookup",
+        "company_report", "company_search", "company_snapshot", "company_watch", "company_watchlist",
+        "court_cases", "dataset_catalog", "dataset_import", "dataset_status", "exchange_rate", "iban_check",
+        "monitor_run", "shop_check", "supplier_check", "supplier_results", "vat_check",
     ]
 
 
@@ -18,10 +21,11 @@ def test_every_parameter_has_a_description():
             assert prop.get("description"), f"{tool.name}.{name} has no description"
 
 
-def test_tools_are_marked_read_only():
+def test_tool_annotations_distinguish_local_writes():
+    writes = {"company_snapshot", "company_watch", "dataset_import", "monitor_run", "supplier_check"}
     for tool in TOOLS:
         assert tool.title, tool.name
-        assert tool.annotations.read_only_hint is True, tool.name
+        assert tool.annotations.read_only_hint is (tool.name not in writes), tool.name
         assert tool.annotations.destructive_hint is False, tool.name
 
 

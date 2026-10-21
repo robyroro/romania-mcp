@@ -15,8 +15,10 @@ import httpx
 from . import anaf, just
 from .cache import cached
 from .common import describe_error, fold, words
+from .evidence import collect
+from .network import page
 
-SITE_UA = "Mozilla/5.0 (compatible; romania-mcp/0.1; +https://github.com/robyroro/romania-mcp)"
+SITE_UA = "Mozilla/5.0 (compatible; romania-mcp/0.2; +https://github.com/robyroro/romania-mcp)"
 
 # links worth following when the homepage doesn't show the CUI
 LEGAL_HINTS = ("termeni", "conditii", "contact", "despre", "about", "legal", "informatii",
@@ -86,32 +88,27 @@ async def read_site(client, url):
     """Fetch the homepage and, if it shows no CUI, a few legal/contact pages."""
     headers = {"User-Agent": SITE_UA, "Accept-Language": "ro,en;q=0.8"}
     try:
-        r = await client.get(url, headers=headers, timeout=15.0)
-    except httpx.HTTPError as e:
+        final, html = await page(client, url, headers=headers)
+    except (httpx.HTTPError, ValueError) as e:
         return {"fetched": False, "error": describe_error(e)}
-    if r.status_code >= 400:
-        return {"fetched": False, "error": f"the site answered {r.status_code} (some shops block non-browser requests)"}
-
-    final = str(r.url)
-    html = r.text
     text = page_text(html)
     pages = [final]
     cuis = find_cuis(text)
     regcom = find_registration_numbers(text)
     anpc = has_anpc_link(html)
+    errors = []
 
     if not cuis:
         for link in legal_links(html, final):
             try:
-                sub = await client.get(link, headers=headers, timeout=10.0)
-            except httpx.HTTPError:
+                sub_url, sub_html = await page(client, link, headers=headers)
+            except (httpx.HTTPError, ValueError) as exc:
+                errors.append({"url": link, "error": describe_error(exc)})
                 continue
-            if sub.status_code >= 400:
-                continue
-            pages.append(link)
-            sub_text = page_text(sub.text)
+            pages.append(sub_url)
+            sub_text = page_text(sub_html)
             text += " " + sub_text
-            anpc = anpc or has_anpc_link(sub.text)
+            anpc = anpc or has_anpc_link(sub_html)
             cuis = find_cuis(sub_text)
             regcom = regcom or find_registration_numbers(sub_text)
             if cuis:
@@ -125,6 +122,8 @@ async def read_site(client, url):
         "cuis_found": cuis,
         "registration_numbers_found": regcom,
         "anpc_links": anpc,
+        "partial": bool(errors),
+        "page_errors": errors,
         "_text": text,
     }
 
@@ -170,22 +169,27 @@ def _days_since(iso, today):
         return None
 
 
-async def _safe(coro):
-    try:
-        return await coro
-    except (httpx.HTTPError, ValueError) as e:
-        return {"error": describe_error(e)}
-
-
 def assess(report, today):
     red, warn, good = [], [], []
     site = report["site"]
     company = report.get("company")
     fin = [y for y in report.get("financials") or [] if y.get("filed", True)]
+    incomplete = bool(report.get("company_error") or report.get("financials_error")
+                      or (report.get("court_cases") or {}).get("error") or not site.get("fetched")
+                      or site.get("partial") or (report.get("court_cases") or {}).get("truncated")
+                      or any(s["status"] not in ("available", "not_applicable") for s in report.get("sources", [])))
+    if report.get("financials_error"):
+        warn.append(f"couldn't check financial statements ({report['financials_error']})")
+    if (report.get("court_cases") or {}).get("error"):
+        warn.append(f"couldn't check court cases ({report['court_cases']['error']})")
+    if not site.get("fetched"):
+        warn.append("couldn't read the shop's pages")
 
     if site.get("fetched") and not site.get("cuis_found") and not report.get("cui_given"):
-        red.append("no CUI (fiscal code) anywhere on the homepage or legal/contact pages. "
-                   "Romanian shops have to show who they are (Legea 365/2002)")
+        if site.get("partial"):
+            warn.append("no CUI found in the pages we could read; some legal/contact pages were unavailable")
+        else:
+            red.append("no CUI (fiscal code) found on the checked homepage or legal/contact pages")
     if site.get("fetched") and not site.get("https"):
         warn.append("site doesn't use https")
     if site.get("fetched"):
@@ -238,7 +242,7 @@ def assess(report, today):
     ages = [d for d in (_days_since(online.get("first_archived"), today),
                         _days_since(online.get("registered"), today)) if d is not None]
     if not ages:
-        warn.append("the Wayback Machine has never archived this site, it's probably very new")
+        warn.append("no archive date found; never archived does not mean the site is new")
     elif max(ages) < 90:
         warn.append(f"the site is only about {max(ages)} days old")
     elif online.get("first_archived"):
@@ -248,6 +252,8 @@ def assess(report, today):
 
     if red:
         risk = "high"
+    elif incomplete:
+        risk = "unknown"
     elif len(warn) >= 2:
         risk = "medium"
     elif not site.get("fetched") and not company:
@@ -266,13 +272,23 @@ async def check(client, url, cui=None, today=None):
         raise ValueError(f"doesn't look like a website: {url!r}")
     domain = registrable_domain(host)
 
-    site, first, registered = await asyncio.gather(
-        read_site(client, url),
-        _safe(first_archived(client, domain)),
-        _safe(domain_registered(client, domain)),
+    site_source, archive_source, rdap_source = await asyncio.gather(
+        collect("Shop pages", url, lambda: read_site(client, url)),
+        collect("Wayback Machine", "https://archive.org/wayback/available", lambda: first_archived(client, domain)),
+        collect("RDAP", f"https://rdap.org/domain/{domain}", lambda: domain_registered(client, domain)),
     )
+    site = site_source["data"] or {"fetched": False, "error": site_source["error"]}
+    if not site.get("fetched"):
+        site_source.update(status="unavailable", error=site.get("error"))
+    elif site.get("partial"):
+        site_source.update(status="partial", error="Some legal/contact pages could not be read")
+    if domain.endswith(".ro"):
+        rdap_source.update(status="not_applicable", note="No public RDAP lookup is used for .ro domains")
+    first, registered = archive_source["data"], rdap_source["data"]
+    sources = [site_source, archive_source, rdap_source]
     report = {
         "url": url,
+        "sources": sources,
         "domain": {
             "name": domain,
             "registered": registered if not isinstance(registered, dict) else None,
@@ -290,35 +306,43 @@ async def check(client, url, cui=None, today=None):
     if report.get("cui"):
         cui = report["cui"]
         years = [today.year - 1, today.year - 2]
-        found, fin = await asyncio.gather(
-            _safe(anaf.lookup(client, [cui])),
-            _safe(anaf.financials(client, cui, years)),
+        company_source, financial_source = await asyncio.gather(
+            collect("ANAF company status", anaf.TVA_URL, lambda: anaf.lookup(client, [cui])),
+            collect("ANAF financial statements", anaf.BILANT_URL, lambda: anaf.financials(client, cui, years)),
         )
-        if isinstance(found, dict):
-            report["company_error"] = found["error"]
+        sources.extend([company_source, financial_source])
+        found, fin = company_source["data"], financial_source["data"]
+        if company_source["error"]:
+            report["company_error"] = company_source["error"]
         else:
             report["company"] = found[0][0] if found[0] else None
-        if isinstance(fin, dict) and "error" in fin:
-            report["financials_error"] = fin["error"]
+        if financial_source["error"]:
+            report["financials_error"] = financial_source["error"]
         else:
             report["financials"] = fin["years"]
+            if any(y.get("filed") is False for y in fin["years"]):
+                financial_source["status"] = "no_data"
 
-        company = report["company"]
+        company = report.get("company")
         if isinstance(company, dict) and company.get("name"):
-            try:
-                report["court_cases"] = await just.company_cases(
-                    client, company["name"], company.get("county"), limit=5)
-            except (httpx.HTTPError, ValueError) as e:
-                report["court_cases"] = {"error": describe_error(e)}
+            court_source = await collect("Portal Just", just.URL, lambda: just.company_cases(
+                client, company["name"], company.get("county"), limit=5))
+            sources.append(court_source)
+            report["court_cases"] = court_source["data"] or {"error": court_source["error"]}
+            if (court_source["data"] or {}).get("truncated"):
+                court_source["status"] = "partial"
 
     risk, red, warn, good = assess(report, today)
     site.pop("_text", None)
     report.pop("cui_given", None)
+    report.pop("sources", None)
     return {
         "risk": risk,
         "red_flags": red,
         "warnings": warn,
         "good_signs": good,
+        "coverage": "partial" if any(s["status"] not in ("available", "not_applicable") for s in sources) else "complete",
+        "sources": [{k: v for k, v in s.items() if k != "data"} for s in sources],
         **report,
         "note": "signals, not proof. a legit company can still run a bad shop, and a scam can "
                 "copy a real company's details, so check the company name on the site matches",

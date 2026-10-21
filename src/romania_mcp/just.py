@@ -129,6 +129,10 @@ def parse_cases(xml_text):
         root = ET.fromstring(clean_xml(xml_text))
     except ET.ParseError as e:
         raise ValueError(f"couldn't read Portal Just's answer ({e})")
+    if any(el.tag.rsplit("}", 1)[-1] == "Fault" for el in root.iter()):
+        raise ValueError("Portal Just returned a service fault")
+    if root.find(f".//{{{NS}}}CautareDosareResponse") is None:
+        raise ValueError("Portal Just returned no case search response")
     cases = []
     for d in root.iter(f"{{{NS}}}Dosar"):
         hearings = [
@@ -285,5 +289,10 @@ async def company_cases(client, name, county=None, limit=20, court=None, since=N
     """Cases of one company (exact name from ANAF): searched by name, then only those where
     a party has exactly that name, with insolvency checked against the county of its seat."""
     cases = await search(client, party=name, court=court, since=since)
+    truncated = len(cases) >= 1000
     cases = [c for c in cases if party_roles(c, name)]
-    return report(cases, party=name, limit=limit, county=county)
+    result = report(cases, party=name, limit=limit, county=county)
+    if truncated:
+        result["truncated"] = True
+        result["note"] = "Portal Just capped the search at 1000 candidates before name filtering; coverage is incomplete"
+    return result
