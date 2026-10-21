@@ -3,10 +3,9 @@ from datetime import date
 
 import httpx
 import pytest
+from conftest import mock_client
 
 from romania_mcp import bnr
-
-from conftest import mock_client
 
 
 def feed(*cubes, ns="https://www.bnr.ro/xsd"):

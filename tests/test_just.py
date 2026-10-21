@@ -2,10 +2,9 @@ import asyncio
 
 import httpx
 import pytest
+from conftest import mock_client
 
 from romania_mcp import just
-
-from conftest import mock_client
 
 RESPONSE = """<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">

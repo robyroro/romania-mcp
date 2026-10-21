@@ -10,7 +10,31 @@ import json
 import os
 import sqlite3
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
+
+_fresh = ContextVar("fresh", default=False)
+_observations = ContextVar("cache_observations", default=None)
+
+
+@contextmanager
+def cache_scope(refresh=False):
+    """Track the age of source data without sharing state between concurrent requests."""
+    observations = []
+    a = _fresh.set(refresh or _fresh.get())
+    b = _observations.set(observations)
+    try:
+        yield observations
+    finally:
+        _observations.reset(b)
+        _fresh.reset(a)
+
+
+def _observe(key, stored_at, hit):
+    observations = _observations.get()
+    if observations is not None:
+        observations.append({"key": key, "stored_at": stored_at, "cache_hit": hit})
 
 
 class Cache:
@@ -24,21 +48,27 @@ class Cache:
         self.db.execute(
             "create table if not exists entries (key text primary key, value text, expires real)"
         )
+        if "stored_at" not in {r[1] for r in self.db.execute("pragma table_info(entries)")}:
+            self.db.execute("alter table entries add column stored_at real")
+            self.db.commit()
 
     def get(self, key):
-        if self.db is None:
+        if self.db is None or _fresh.get():
             return None
-        row = self.db.execute("select value, expires from entries where key = ?", (key,)).fetchone()
+        row = self.db.execute("select value, expires, stored_at from entries where key = ?", (key,)).fetchone()
         if row is None or row[1] < time.time():
             return None
+        _observe(key, row[2], True)
         return json.loads(row[0])
 
     def set(self, key, value, ttl):
+        stored_at = time.time()
+        _observe(key, stored_at, False)
         if self.db is None:
             return
         self.db.execute(
-            "insert or replace into entries values (?, ?, ?)",
-            (key, json.dumps(value), time.time() + ttl),
+            "insert or replace into entries (key, value, expires, stored_at) values (?, ?, ?, ?)",
+            (key, json.dumps(value), stored_at + ttl, stored_at),
         )
         self.db.commit()
 

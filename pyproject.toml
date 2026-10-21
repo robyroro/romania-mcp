@@ -1,7 +1,7 @@
 [project]
 name = "romania-mcp-server"
-version = "0.1.0"
-description = "MCP server for Romanian public data: ANAF company status, financial statements, court cases, BNR exchange rates, online shop checks"
+version = "0.2.0"
+description = "Romanian company reports, ONRC search, financial trends, court checks, public contracts and local monitoring"
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "Robert Vind-Gardoș" }]
@@ -13,8 +13,10 @@ classifiers = [
     "Topic :: Office/Business :: Financial :: Accounting",
 ]
 dependencies = [
-    "mcp>=2.0",
-    "httpx>=0.27",
+    "mcp>=2.0,<3",
+    "httpx>=0.27,<1",
+    "httpcore>=1.0,<2",
+    "openpyxl>=3.1",
 ]
 
 [project.urls]
@@ -25,6 +27,7 @@ Author = "https://stratagency.ro/en/robert-vind-gardos"
 romania-mcp = "romania_mcp.server:main"
 # so `uvx romania-mcp-server` works without --from
 romania-mcp-server = "romania_mcp.server:main"
+romania-mcp-data = "romania_mcp.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/romania_mcp"]
@@ -38,3 +41,6 @@ build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

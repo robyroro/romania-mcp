@@ -4,10 +4,9 @@ from datetime import date
 
 import httpx
 import pytest
-
-from romania_mcp import just, shop
-
 from conftest import anaf_item, bilant_body, mock_client
+
+from romania_mcp import shop
 
 TODAY = date(2026, 10, 1)
 
@@ -121,7 +120,7 @@ def test_check_end_to_end():
         if "bilant" in url:
             return httpx.Response(200, json=bilant_body(year=int(request.url.params["an"])))
         if "portalquery" in url:
-            return httpx.Response(200, text='<Envelope xmlns="portalquery.just.ro"/>')
+            return httpx.Response(200, text='<Envelope xmlns="portalquery.just.ro"><CautareDosareResponse><CautareDosareResult/></CautareDosareResponse></Envelope>')
         return httpx.Response(404)
 
     async def go():

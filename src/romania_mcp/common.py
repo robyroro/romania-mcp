@@ -3,7 +3,9 @@ import unicodedata
 
 import httpx
 
-USER_AGENT = "romania-mcp/0.1 (+https://github.com/robyroro/romania-mcp)"
+from .network import transport
+
+USER_AGENT = "romania-mcp/0.2 (+https://github.com/robyroro/romania-mcp)"
 
 
 def make_client(timeout=20.0):
@@ -11,6 +13,8 @@ def make_client(timeout=20.0):
         headers={"User-Agent": USER_AGENT},
         timeout=timeout,
         follow_redirects=True,
+        transport=transport(),
+        trust_env=False,
     )
 
 
